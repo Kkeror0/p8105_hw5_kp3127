@@ -1,0 +1,373 @@
+---
+title: "p8105_hw3_kp3127"
+output: html_document
+date: "2025-10-07"
+---
+```{r setup, echo=FALSE}
+library(tidyverse)
+library(patchwork)
+
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+```
+
+# Problem 1
+```{r}
+library(p8105.datasets)
+data("instacart")
+dim(instacart)
+names(instacart)
+```
+Instacart is an online grocery service that allows you to shop online from local stores. In New York City, partner stores include Whole Foods, Fairway, and The Food Emporium. Instacart offers same-day delivery, and items that users purchase are delivered within 2 hours.  
+The Instacart dataset contains `r nrow(instacart)` observations and `r ncol(instacart)` variables.
+Each row corresponds to a single product purchased within an order, and variables describe both the product and ordering details.
+For instance, key variables include:
+
+`order_id` (unique order identifier)
+
+`product_name` (name of the purchased item)
+
+`aisle and department` (location and product category)
+
+`order_dow` and `order_hour_of_day` (day of week and time of day when order was placed)
+
+Example observations include items such as “Bulgarian Yogurt” from the “yogurt” aisle or “Organic Baby Spinach” from the “fresh vegetables” aisle.
+This dataset provides a rich source for exploring consumer purchasing patterns across different times, aisles, and departments.  
+```{r}
+instacart_sum <- instacart %>% 
+  count(aisle_id, aisle, sort = TRUE)
+```
+There are `r nrow(instacart_sum)` aisles in total. 
+The aisle with the most items ordered is `r head(instacart_sum)$aisle[1]`, with `r 
+```{r}
+instacart_sum %>% 
+  filter(n>10000) %>% 
+  mutate(aisle = fct_reorder(aisle, n)) 
+instacart_sum |>
+  ggplot(aes(x = aisle_id, y = n)) +
+  geom_point() +
+  labs(
+    title = "Number of items ordered by aisle (more than 10,000 orders)",
+    x = "Aisle_id",
+    y = "Number of items ordered"
+  ) +
+  theme_minimal()
+```
+```{r}
+popular_items = instacart %>%
+  filter(aisle %in% c("baking ingredients", "dog food care", "packaged vegetables fruits")) %>%
+  group_by(aisle, product_name) %>%
+  summarise(n_orders = n()) %>%
+  arrange(aisle, desc(n_orders)) %>% 
+  filter(min_rank(desc(n_orders))<4)
+popular_items
+```
+
+```{r}
+mean_table <- instacart %>%
+  filter(product_name %in% c("Pink Lady Apples", "Coffee Ice Cream")) %>%
+  group_by(product_name, order_dow) %>% 
+  summarise(mean_hr=mean(order_hour_of_day, na.rm=TRUE)) %>% 
+  mutate(order_dow = recode(order_dow,
+                            `0` = "Sun", `1` = "Mon", `2` = "Tue", `3` = "Wed",
+                            `4` = "Thu", `5` = "Fri", `6` = "Sat")) %>% 
+  pivot_wider(
+    names_from = order_dow,
+    values_from = mean_hr
+  )
+knitr::kable(
+  mean_table,
+  caption = "the mean hour of the day of Pink Lady Apples and Coffee Ice Cream ;"
+)
+```
+
+# Problem 2 
+```{r}
+zip_code=read.csv("./zillow_data/Zip Codes.csv") %>% 
+  janitor::clean_names() %>% 
+  mutate(
+    zip=as.character(zip_code)
+  ) %>% 
+  select(zip,county,neighborhood) %>% 
+  arrange(zip)
+
+zori_nyc=read.csv("./zillow_data/Zip_zori_uc_sfrcondomfr_sm_month_NYC.csv") %>% 
+  janitor::clean_names() %>% 
+  pivot_longer(
+    cols = 10:last_col(),
+    names_to = "date",
+    values_to = "rent_index"
+  ) %>%
+  mutate(
+    zip=as.character(region_name),
+    date=str_remove(date,"^x"), 
+    date=ymd(str_replace_all(date,"_","-"))
+  ) %>% 
+  select(zip,date,rent_index) %>% 
+  drop_na(rent_index) %>%    
+  arrange(zip)
+```
+
+```{r}
+zori_obs <- zori_nyc %>% 
+  group_by(zip) %>% 
+  summarise(n_obs=n())
+
+n_full <- zori_obs %>%
+  filter(n_obs == 116) %>%
+  nrow()
+
+n_sparse <- zori_obs %>%
+  filter(n_obs < 10) %>%
+  nrow()
+```
+There are `r n_full` ZIP codes observed in all 116 months,
+and `r n_sparse` ZIP codes observed fewer than 10 times.  
+Why are some ZIP codes are observed rarely and others observed in each month?  
+Some ZIP codes appear rarely in the Zillow dataset because Zillow only reports a rent index when there are enough active rental listings to produce a reliable median estimate.
+
+```{r}
+zipmap_dups <- zip_code %>% count(zip) %>% filter(n > 1)
+zipmap_dups
+zip_code <- zip_code %>%
+  mutate(
+    county = case_when(
+      zip == "10463" ~ "Bronx", 
+      zip == "11201" ~ "Kings", 
+      TRUE ~ county 
+    )
+  ) %>%
+  distinct(zip, .keep_all = TRUE) 
+zori_final <- zori_nyc %>%
+  left_join(zip_code, by = "zip") %>%
+  arrange(zip, date)
+```
+
+```{r}
+zori_table <- zori_final %>% 
+  mutate(year=year(date)) %>% 
+  group_by(county,year) %>% 
+  summarise(
+    mean_rent = mean(rent_index, na.rm = TRUE)
+  ) %>% 
+  pivot_wider(
+    names_from = year,
+    values_from = mean_rent
+  )
+knitr::kable(
+  zori_table,
+  caption = "the average rental price in each borough and year"
+)
+```
+Average rents rose across all boroughs from 2015 to 2024.  
+Manhattan remained the most expensive, with a brief dip around 2020 followed by strong growth after 2022.  
+Brooklyn and Queens showed steady increases, while the Bronx—though still cheapest—had the fastest relative rise.  
+Staten Island appears only after 2020, likely due to limited earlier data.  
+
+```{r}
+zori_zip_year <- zori_final %>% 
+  mutate(
+        year=year(date),
+    borough = case_match(
+      county,
+      "Bronx" ~ "Bronx",
+      "Kings" ~ "Brooklyn",
+      "New York" ~ "Manhattan",
+      "Queens" ~ "Queens",
+      "Richmond" ~ "Staten Island",
+      .default = NA_character_    
+         ) 
+  ) %>% 
+  group_by(borough,year) %>% 
+  summarise(mean_rent = mean(rent_index, na.rm = TRUE))
+```
+```{r}
+zori_line <- 
+  ggplot(zori_zip_year, aes(x = year, y = mean_rent, color = borough)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 1.8) +
+  labs(
+    title = "NYC Rental Prices within ZIP Codes for All Available Years",
+    x = "Year",
+    y = "Average Rental Price ($)",
+    color = "Borough"
+  ) +
+  scale_x_continuous(
+    breaks = seq(min(zori_zip_year$year, na.rm = TRUE),
+                 max(zori_zip_year$year, na.rm = TRUE),
+                 by = 1)
+  ) +
+  theme_minimal()
+zori_line
+```
+Rental prices increased steadily across all five NYC boroughs between 2015 and 2024, with a noticeable dip around 2020–2021 followed by a sharp post-pandemic rebound.  
+Manhattan remains the most expensive borough, with average rents rising from just over $3,000 in 2015 to above $4,000 by 2024.  
+Brooklyn and Queens show consistent growth and now exceed $3,000 and $2,600 respectively.  
+The Bronx is still the most affordable area but experienced the fastest proportional increase, rising from roughly $1,700 to about $2,500.  
+Staten Island appears in the dataset later (around 2020) and follows a similar upward trend.  
+
+```{r}
+zori_23 <- zori_final %>% 
+  mutate(
+        year=year(date),
+    borough = case_match(
+      county,
+      "Bronx" ~ "Bronx",
+      "Kings" ~ "Brooklyn",
+      "New York" ~ "Manhattan",
+      "Queens" ~ "Queens",
+      "Richmond" ~ "Staten Island",
+      .default = NA_character_    
+         ) 
+  ) %>%   
+  filter(year == 2023, !is.na(borough)) %>%
+  group_by(borough, zip) %>%
+  summarise(mean_rent23 = mean(rent_index, na.rm = TRUE))  
+```
+```{r}
+zori_box <- 
+ggplot(zori_23, aes(x = borough, y = mean_rent23, fill = borough)) +
+  geom_boxplot(alpha = 0.5) +
+  labs(
+    title = "Distribution of ZIP-Code-Level Rental Prices by Borough (2023)",
+    x = "Borough",
+    y = "Average Rental Price ($)"
+  ) +
+  theme_minimal()
+zori_box
+```
+  
+Median rental prices in 2023 differ markedly across boroughs, showing NYC’s persistent housing cost gradient.  
+Manhattan has the highest median rent (around $4,000 per month) and the widest spread, reflecting both luxury and moderate ZIP codes.  
+Brooklyn follows, with a lower median (~$3,000) but large variation, suggesting diverse neighborhoods ranging from affordable to high-end.  
+Queens and Staten Island have similar median rents near $2,500, with tighter distributions—fewer extremely high-rent areas.  
+The Bronx remains the most affordable borough, centered around $2,200, though a few higher-rent ZIPs push the upper whisker.  
+
+combine and save
+```{r}
+combined_plot <- zori_line / zori_box +
+  plot_annotation(title = "NYC Rental Price Trends and 2023 Distributions")
+
+ggsave("nyc_rental_combined.png", combined_plot, width = 12, height = 8, dpi = 300)
+```
+
+# Problem 3
+```{r}
+accel=read.csv("./nhanes_accel.csv") %>% 
+  janitor::clean_names()
+covar=read.csv("./nhanes_covar.csv",skip=4) %>% 
+  janitor::clean_names()
+nhanes_merged <-covar  %>%
+  left_join(accel, by = "seqn") %>% 
+  filter(age>=21) %>% 
+  drop_na(sex, age, bmi, education) %>% 
+  mutate(
+    sex = recode_factor(sex, "1" = "Male", "2" = "Female"),
+    education = recode_factor(
+      education,
+      "1" = "Less than high school",
+      "2" = "High school equivalent",
+      "3" = "More than high school",
+      .ordered = TRUE
+    )
+  )  
+```
+
+```{r}
+edu_sex_table <- nhanes_merged %>% 
+  group_by(education,sex) %>% 
+  summarise(n_par=n()) %>% 
+  pivot_wider(
+    names_from = sex,
+    values_from = n_par
+  )
+knitr::kable(
+  edu_sex_table,
+  caption = "Number of men and women by education level"
+)
+```
+
+```{r}
+ggplot(nhanes_merged, aes(x = age, fill = sex)) +
+  geom_density(alpha = .5) +
+  facet_wrap(~ education, nrow = 1) +
+  labs(
+    title = "Age distribution by education level and sex",
+    x = "Age (years)",
+    y = "Density",
+    fill = "Sex"
+  ) +
+  theme_minimal()
+```
+```{r}
+total_mims <- nhanes_merged %>% 
+  mutate(
+    total_activity = rowSums(across(starts_with("min")), na.rm = TRUE)
+  ) %>%
+  distinct(seqn, age, sex, education, total_activity)  
+```
+
+```{r}
+ggplot(total_mims, aes(x = age, y = total_activity, color = sex)) +
+  geom_point(alpha = .5) +
+  geom_smooth(se = FALSE, linewidth = 1) +
+  facet_wrap(~ education, nrow=1) +
+  labs(
+    title = "Total Daily Activity vs. Age by Sex and Education Level",
+    x = "Age (years)",
+    y = "Total MIMS Activity (sum over 24 hours)",
+    color = "Sex"
+  ) +
+  theme_minimal()
+```
+Total activity decreases with age across all education levels.  
+Differences by sex are modest, though younger women tend to have higher activity levels.  
+Participants with higher education appear to maintain activity more consistently through adulthood.  
+
+```{r}
+nhanes_timeline <- nhanes_merged %>% 
+  pivot_longer(
+    cols = starts_with("min"),
+    names_to = "minute",
+    values_to = "mims"
+  ) %>% 
+  mutate(
+    minute = as.numeric(str_remove(minute, "min")),
+    hour = ceiling(minute / 60) 
+  ) %>% 
+  group_by(education,sex,hour) %>% 
+  summarise(mean_mims=mean(mims), na_rm=TRUE)
+```
+```{r}
+ggplot(nhanes_timeline, aes(x = hour, y = mean_mims, color = sex)) +
+  geom_line(linewidth = 0.5) +
+  geom_smooth(se = FALSE, linewidth = .8,linetype = "dashed") + 
+  facet_wrap(~ education, nrow = 1) +
+  scale_x_continuous(breaks = seq(0, 24, 4)) +
+  labs(
+    title = "Average 24-Hour Activity Pattern by Education Level and Sex",
+    subtitle = "Based on 1-minute MIMS averages across all participants",
+    x = "Hour of Day",
+    y = "Mean MIMS Activity",
+    color = "Sex"
+  ) +
+  theme_minimal() 
+```
+```
+Across all education levels, physical activity rises sharply after waking, peaks in the late morning, and declines steadily into the evening.  
+Women show slightly higher mid-day activity than men, particularly among those with higher education.  
+Participants with more than high school education maintain elevated activity throughout the day, whereas those with less than high school education show lower overall activity and steeper afternoon declines.  
+Overall, daily patterns are consistent—early morning increase, midday plateau, and evening drop—but differ modestly in intensity by sex and education.  
