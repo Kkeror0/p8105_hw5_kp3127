@@ -100,7 +100,7 @@ power_df=sim_res %>%
 
 Describe the association between effect size and power.
 ```{r}
-power_df |>
+power_df %>% 
   ggplot(aes(mu, power)) +
   geom_point() + geom_line() +
   scale_x_continuous(breaks = mus, limits = c(0, 6)) +
@@ -109,3 +109,28 @@ power_df |>
   theme_minimal()
 ```
 
+Calculate the mu_hat
+```{r}
+mu_df=sim_res %>% 
+  group_by(mu) %>% 
+  summarize(
+    mu_hat_all=mean(mu_hat),
+    mu_hat_rej=mean(mu_hat[reject==TRUE])
+  )
+```
+
+Create a plot to compare true mu and mu_hat
+```{r}
+mu_df |>
+  pivot_longer(-mu, names_to = "which", values_to = "avg_mu_hat") |>
+  ggplot(aes(mu, avg_mu_hat, color = which)) +
+  geom_point() + geom_line() +
+  geom_abline(slope = 1, intercept = 0, linetype = 2) +
+  scale_x_continuous(breaks = 0:6, limits = c(0, 6)) +
+  labs(title = "Average sample mean vs true μ",
+       x = "True μ", y = "Average  μ̂ (all vs only rejected)") +
+  theme_minimal(base_size = 12)
+```
+All samples (mu_hat_all): essentially unbiased. 
+Significant-only (mu_hat_rej): inflated when power < 1, then converges to μ as power → 1.
+This is selection on statistical significance (the “winner’s curse”). When power isn’t 1, only datasets where random error pushes mu upward tend to pass p<0.05, so the conditional average among rejections is biased high. As the true effect grows (power → 1), nearly every sample rejects and the selection bias vanishes.
