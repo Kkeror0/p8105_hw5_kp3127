@@ -57,3 +57,55 @@ sim_df |>
 ```
 The curve rises monotonically with group size. It crosses 0.50 when n = 23.  
 This result matches the classic birthday paradox: with just 23 people, there’s over a 50% chance at least two share a birthday.
+
+# Problem 2
+```{r}
+library(broom)
+```
+
+For a given mu, create a function to get the results of mu_hat and p-value
+```{r}
+set.seed(1)
+n      <- 30
+sigma  <- 5
+mus    <- 0:6
+n_sim  <- 5000
+alpha  <- 0.05
+
+sim_ttest = function(mu) {
+  map_dfr(1:n_sim, function(i) {
+    x = rnorm(n, mean = mu, sd = sigma)
+    ttest = tidy(t.test(x, mu = 0))
+    tibble(
+      mu = mu,
+      mu_hat = ttest$estimate,   
+      p = ttest$p.value,    
+      reject = p < alpha
+    )
+  })
+}
+```
+
+Repeat the function for different mu[0:6] 
+```{r}
+sim_res=map_dfr(mus, sim_ttest)
+```
+
+Calculate the power
+```{r}
+power_df=sim_res %>% 
+  group_by(mu) %>% 
+  summarize(power=mean(reject))
+```
+
+Describe the association between effect size and power.
+```{r}
+power_df |>
+  ggplot(aes(mu, power)) +
+  geom_point() + geom_line() +
+  scale_x_continuous(breaks = mus, limits = c(0, 6)) +
+  labs(title = "Power of one-sample t-test (n = 30, σ = 5, α = 0.05)",
+       x = "True mean (μ)", y = "Estimated power (5,000 sims)") +
+  theme_minimal()
+```
+
