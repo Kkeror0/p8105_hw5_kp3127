@@ -7,6 +7,7 @@ date: "2025-11-05"
 library(tidyverse)
 library(rvest)
 library(patchwork)
+library(purrr)
 
 knitr::opts_chunk$set(
   fig.width = 6,
@@ -55,6 +56,7 @@ sim_df |>
   ) +
   theme_minimal()
 ```
+
 The curve rises monotonically with group size. It crosses 0.50 when n = 23.  
 This result matches the classic birthday paradox: with just 23 people, there’s over a 50% chance at least two share a birthday.
 
@@ -131,6 +133,96 @@ mu_df |>
        x = "True μ", y = "Average  μ̂ (all vs only rejected)") +
   theme_minimal(base_size = 12)
 ```
-All samples (mu_hat_all): essentially unbiased. 
-Significant-only (mu_hat_rej): inflated when power < 1, then converges to μ as power → 1.
+All samples (mu_hat_all): essentially unbiased.   
+Significant-only (mu_hat_rej): inflated when power < 1, then converges to μ as power → 1.  
 This is selection on statistical significance (the “winner’s curse”). When power isn’t 1, only datasets where random error pushes mu upward tend to pass p<0.05, so the conditional average among rejections is biased high. As the true effect grows (power → 1), nearly every sample rejects and the selection bias vanishes.
+
+# Problem 3
+```{r}
+homi = read_csv("./homicide-data.csv") %>%  
+  janitor::clean_names()
+```
+
+Describe the raw data
+```{r}
+n_rows   = nrow(homi)
+n_cols   = ncol(homi)
+city_n   = homi %>%  distinct(city, state) %>%  nrow()
+year_min = homi %>%  summarise(y = min(year(ymd(reported_date)), na.rm = TRUE)) %>%  pull(y)
+year_max = homi %>%  summarise(y = max(year(ymd(reported_date)), na.rm = TRUE)) %>%  pull(y)
+```
+
+This raw dataset contains **one row per homicide case**, with `r n_rows` observations and `r n_cols` variables, spanning `r city_n` distinct city–state combinations from **`r year_min`** to **`r year_max`**. Core fields include the report date, victim demographics (age, sex, race), location (city, state, latitude/longitude), and the case disposition.
+
+Create the new variable
+```{r}
+homi=homi %>% 
+  mutate(
+    city_state = paste(city, state, sep = ", "),
+    unsolved = disposition %in% c("Closed without arrest", "Open/No arrest")
+  )
+
+city_sum <- homi |>
+  group_by(city_state) |>
+  summarise(
+    total    = n(),
+    unsolved = sum(unsolved, na.rm = TRUE),
+    .groups  = "drop"
+  ) %>% 
+  arrange(desc(total))
+
+Baltimore_homi =city_sum %>% 
+  filter(city_state == "Baltimore, MD")
+head(Baltimore_homi)
+```
+Apply r`prop.test` function to Baltimore: 
+```{r}
+pt_balt <- prop.test(
+  x = Baltimore_homi$unsolved,
+  n = Baltimore_homi$total
+)
+
+balt_est <- broom::tidy(pt_balt) |>
+  select(estimate, conf.low, conf.high)
+
+balt_est
+```
+
+Apply `prop.test` function to all: 
+```{r}
+pb_city = city_sum %>% 
+  transmute(
+    city_state,
+    x = as.integer(unsolved),
+    n = as.integer(total)
+  ) %>% 
+  mutate(
+    test = map2(x, n, ~ prop.test(.x, .y)),   
+    tidy = map(test, broom::tidy)
+  ) %>% 
+  select(-test) %>% 
+  unnest(tidy) %>% 
+  select(city_state, x, n, estimate, conf.low, conf.high) %>% 
+  arrange(desc(estimate))
+
+pb_city
+```
+
+Now we make a plot:
+```{r}
+pb_city %>%
+  mutate(city_state = fct_reorder(city_state, estimate)) %>%
+  ggplot(aes(city_state, estimate)) +
+  geom_point(size = 1.8) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "Proportion of unsolved homicides by city",
+    x = NULL,
+    y = "Proportion unsolved (95% CI)"
+  ) +
+  theme_minimal()
+
+```
+
